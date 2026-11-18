@@ -3,7 +3,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 import os
 import requests
-from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 
 
@@ -51,22 +51,28 @@ YOUR WORKFLOW:
 
 """
 ## The Agent = llm + toold
-agent = create_agent(
-    model=llm,
-    tools=[get_weather, get_location],
-    system_prompt=system_prompt,
-    checkpointer=InMemorySaver()
+with SqliteSaver.from_conn_string('checkpoint.db') as db:
+        agent = create_agent(
+            model=llm,
+            tools=[get_weather, get_location],
+            system_prompt=system_prompt,
+            checkpointer=db
 
-)
-if __name__ == "__main__":
-  while True:
+        )
+        if __name__ == "__main__":
+          while True:
 
-        user_query = input("Enter your query:")
-        if user_query in [ "exit", "quit" , "stop" ]:
-            break
+                user_query = input("Enter your query:")
+                if user_query in [ "exit", "quit" , "stop","bye" ]:
+                    break
 
-        response = agent.invoke(
-        {"messages": [{'role': 'user','content': user_query}]},
-        {"configurable": {"thread_id":"1"}})
+                response = agent.invoke(
+                {"messages": [{'role': 'user','content': user_query}]},
+                {"configurable": {"thread_id":"1"}})
+                for i in response["messages"]:
+                    if i.type == 'human':
+                     print("YOU: ",i.content)
+                    if i.type  == "agent":
+                     print("Agent: ", i.content)
 
-        print(response["messages"][-1].text)
+                print(response["messages"][-1].text)

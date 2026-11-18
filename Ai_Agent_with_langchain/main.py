@@ -3,7 +3,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
 import os
 import requests
-
+from langgraph.checkpoint.memory import InMemorySaver
 
 
 
@@ -54,15 +54,19 @@ YOUR WORKFLOW:
 agent = create_agent(
     model=llm,
     tools=[get_weather, get_location],
-    system_prompt=system_prompt
+    system_prompt=system_prompt,
+    checkpointer=InMemorySaver()
 
 )
 if __name__ == "__main__":
+  while True:
 
         user_query = input("Enter your query:")
-        ## ask the questision 
+        if user_query in [ "exit", "quit" , "stop" ]:
+            break
+
         response = agent.invoke(
-            {"messages": [{'role': 'user',
-                            'content': user_query}]})
+        {"messages": [{'role': 'user','content': user_query}]},
+        {"configurable": {"thread_id":"1"}})
 
         print(response["messages"][-1].text)

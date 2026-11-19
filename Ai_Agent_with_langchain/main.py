@@ -1,39 +1,61 @@
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_agent
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg_pool import ConnectionPool
+from psycopg.rows import dict_row
 import os
 import requests
-from langgraph.checkpoint.sqlite import SqliteSaver
-
 
 
 load_dotenv()
+DB_URL = os.getenv("DATABASE_URL")
+
+
 ###intilize Gemini flash 2.5
 
 
 def get_weather(city: str):
-  """ Get weather for a given city """
-  api_key = os.getenv("OPENWEATHER_API_KEY")
-  base_url = "http://api.openweathermap.org/data/2.5/weather"
-  params = {
-    "q":city,
-    "appid": api_key,
-    'units': 'metric'
-  }
-  response = requests.get(base_url,params=params)
-  data = response.json()
-  return data
-  
+    """ Get weather for a given city """
+    api_key = os.getenv("OPENWEATHER_API_KEY")
+    base_url = "http://api.openweathermap.org/data/2.5/weather"
+    params = {
+        "q": city,
+        "appid": api_key,
+        'units': 'metric'
+    }
+    response = requests.get(base_url, params=params)
+    data = response.json()
+    return data
+
 
 def get_location():
-  """ Get user's  current location , use this when  user asks about weather without asking about the city """
-  ###base_url = "https://ipapi.co/json"
-  response = requests.get("https://ipapi.co/json", headers={"User-agent": "your-bot 0.1"})
-  data = response.json()
-  city = data.get('city')
-  country_name = data.get('country_name')
-  ##country = data.get('country_name')
-  return f"{city}, {country_name}"
+    """ Get user's  current location , use this when  user asks about weather without asking about the city """
+    ###base_url = "https://ipapi.co/json"
+    response = requests.get("https://ipapi.co/json", headers={"User-agent": "your-bot 0.1"})
+    data = response.json()
+    city = data.get('city')
+    country_name = data.get('country_name')
+    ##country = data.get('country_name')
+    return f"{city}, {country_name}"
+
+## Database: open once, stay open while the app runs
+pool = ConnectionPool(
+    conninfo=DB_URL,
+    min_size=1,
+    max_size=5,
+    max_idle=300,
+    check=ConnectionPool.check_connection,
+    kwargs={
+        "autocommit": True,
+        "prepare_threshold": 0,
+        "row_factory": dict_row,
+    },
+)
+
+checkpointer = PostgresSaver(pool)
+checkpointer.setup()
+
 ##llm
 
 llm = ChatGoogleGenerativeAI(
@@ -41,7 +63,7 @@ llm = ChatGoogleGenerativeAI(
     temperature=0.7,
 )
 
-system_prompt= """ you are helpful weather assistent 
+system_prompt = """ you are helpful weather assistent 
 YOUR WORKFLOW:
 1- if user ask about weather WITHOUT specifying a location , you MUST:
    - First call get_location() to find thier location 
@@ -50,29 +72,14 @@ YOUR WORKFLOW:
 3- use your knowledge to determine which temperature unit is standard for the given location 
 
 """
-## The Agent = llm + toold
-with SqliteSaver.from_conn_string('checkpoint.db') as db:
-        agent = create_agent(
-            model=llm,
-            tools=[get_weather, get_location],
-            system_prompt=system_prompt,
-            checkpointer=db
+## The Agent = llm + tools + memory
+agent = create_agent(
+    model=llm,
+    tools=[get_weather, get_location],
+    system_prompt=system_prompt,
+    checkpointer=checkpointer,
+)
 
-        )
-        if __name__ == "__main__":
-          while True:
 
-                user_query = input("Enter your query:")
-                if user_query in [ "exit", "quit" , "stop","bye" ]:
-                    break
 
-                response = agent.invoke(
-                {"messages": [{'role': 'user','content': user_query}]},
-                {"configurable": {"thread_id":"1"}})
-                for i in response["messages"]:
-                    if i.type == 'human':
-                     print("YOU: ",i.content)
-                    if i.type  == "agent":
-                     print("Agent: ", i.content)
 
-                print(response["messages"][-1].text)
